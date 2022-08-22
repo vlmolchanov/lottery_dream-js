@@ -1,9 +1,13 @@
-const { getNamedAccounts, deployments, network, ethers } = require("hardhat");
-const { developmentChains } = require("../helper-hardhat-config");
+const { network, ethers } = require("hardhat");
+const {
+  developmentChains,
+  DECIMALS,
+  INITIAL_ANSWER,
+} = require("../helper-hardhat-config");
 
 // Parameters for MockV3Aggregator:
-const DECIMALS = 8;
-const INITIAL_ANSWER = 147777777776;
+/*const DECIMALS = 8;
+const INITIAL_ANSWER = 189360777776;*/
 
 // Parameters for VRFCoordinator:
 const BASE_FEE = 1;
@@ -12,8 +16,6 @@ const GAS_PRICE_LINK = 1;
 module.exports = async ({ getNamedAccounts, deployments }) => {
   const { deploy, log } = deployments;
   const { deployer } = await getNamedAccounts();
-
-  let VRFCoordinatorV2MockAddress, mockSubscriptionId;
 
   //If we are on a local development network - deploy mocks!
   if (developmentChains.includes(network.name)) {
@@ -39,6 +41,34 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
       args: [BASE_FEE, GAS_PRICE_LINK],
       waitConfirmations: 1,
     });
+
+    // MockAavePool
+    await deploy("MockAavePool", {
+      from: deployer,
+      log: true,
+      args: [],
+      waitConfirmations: 1,
+    });
+
+    // MockWeth
+    await deploy("MockAaveWeth", {
+      from: deployer,
+      log: true,
+      args: [],
+      waitConfirmations: 1,
+    });
+    const mockAaveWethContract = await ethers.getContract(
+      "MockAaveWeth",
+      deployer
+    );
+    await mockAaveWethContract.mint();
+
+    const mockAaveWethBalance = await mockAaveWethContract.balanceOf(
+      mockAaveWethContract.address
+    );
+    const wethBalance = ethers.utils.formatUnits(mockAaveWethBalance, "ether");
+
+    log(`${wethBalance} ETH minted to MockAaveWeth contract`);
 
     log("Mocks Deployed");
     log("----------------------------------------------------------");

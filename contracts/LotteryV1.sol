@@ -7,8 +7,6 @@ import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "../interfaces/IPool.sol";
 
-//import "../interfaces/IWeth.sol";
-
 interface IWeth {
     function balanceOf(address owner) external view returns (uint256 balance);
 
@@ -23,7 +21,7 @@ interface IWeth {
     function withdraw(uint) external;
 }
 
-/* Errors */
+// Errors
 error Lottery_OnlyOwnerAuthorized();
 error Lottery_NotEnoughEthToEnter();
 error Lottery_IncorrectRandomNumber();
@@ -33,12 +31,13 @@ error Lottery_IncorrectState_CalcWinnerRequired();
 error Lottery_IncorrectState_WinnerSelectedRequired();
 error Lottery_InsufficientEntranceFee();
 
-/**@title Dream Lottery Contract
+/**@title A sample Lottery Contract
  * @author Vladimir Molchanov
- * @notice This contract is updated with Style Guide, Natspec, Solhint linter recomendations, Slither test . Also some other modifications are performed.
- * @dev This implements the Chainlink VRF Version 2. Money are deposited to Aave
+ * @notice This contract is for creating a sample lottery contract. V2 updates require to errors and some other updates
+ * Updates saved gas 2089080 (Lottery) vs 2681167 (LotteryV0)
+ * @dev This implements the Chainlink VRF Version 2
  */
-contract Lottery is VRFConsumerBaseV2 {
+contract LotteryV1 is VRFConsumerBaseV2 {
     /* Type declarations */
     enum LotteryState {
         OPEN,
@@ -85,68 +84,11 @@ contract Lottery is VRFConsumerBaseV2 {
         uint256 recentWinnerIndex,
         address recentWinner
     );
-    /**
-     * @notice Keeping track of ETH send to contract
-     */
     event EthReceived(uint256 date, address player, uint256 amount);
     event MoneySentToWinner(uint256 date, address player, uint256 amount);
-    event EntranceFeeChanged(uint256 date, uint256 entranceFee, address player);
-    event EmrgStopLotteryInitiated(
-        uint256 date,
-        address player,
-        uint256 prizePool
-    );
-
-    /* Modifiers */
-    /**
-     * @notice Only admin is allowed to do this operation
-     */
-    modifier onlyOwner() {
-        if (msg.sender != i_owner) {
-            revert Lottery_OnlyOwnerAuthorized();
-        }
-        _;
-    }
-    /**
-     * @notice Lottery should be started
-     */
-    modifier lotteryOpen() {
-        if (s_lotteryState != LotteryState.OPEN) {
-            revert Lottery_IncorrectState_OpenRequired();
-        }
-        _;
-    }
-    /**
-     * @notice Lottery should be finished
-     */
-    modifier lotteryClose() {
-        if (s_lotteryState != LotteryState.CLOSE) {
-            revert Lottery_IncorrectState_CloseRequired();
-        }
-        _;
-    }
-    /**
-     * @notice Lottery should be in process of calculating winner
-     */
-    modifier lotteryCalculatingWinner() {
-        if (s_lotteryState != LotteryState.CALCULATING_WINNER) {
-            revert Lottery_IncorrectState_CalcWinnerRequired();
-        }
-        _;
-    }
-    /**
-     * @notice Lottery should select winner
-     */
-    modifier lotteryWinnerSelected() {
-        if (s_lotteryState != LotteryState.WINNER_SELECTED) {
-            revert Lottery_IncorrectState_WinnerSelectedRequired();
-        }
-        _;
-    }
 
     /* Functions */
     constructor(
-        uint256 _entranceFee,
         address _priceFeedAddress,
         address _vrfCoordinator,
         address _aavePoolAddress,
@@ -154,10 +96,7 @@ contract Lottery is VRFConsumerBaseV2 {
         uint64 _subscriptionId,
         bytes32 _keyHash
     ) VRFConsumerBaseV2(_vrfCoordinator) {
-        if (_entranceFee < 1) {
-            revert Lottery_InsufficientEntranceFee();
-        }
-        s_entranceFeeUSD = _entranceFee;
+        s_entranceFeeUSD = 50;
         s_lotteryState = LotteryState.CLOSE;
         i_owner = msg.sender;
         i_priceFeed = AggregatorV3Interface(_priceFeedAddress);
@@ -169,34 +108,13 @@ contract Lottery is VRFConsumerBaseV2 {
         i_wethContract = IWeth(_wethContractAddress);
     }
 
-    /**
-     * @dev Contract is changing WETH to ETH, so it should be capable of receiving ETH
-     */
     receive() external payable {
         emit EthReceived(block.timestamp, msg.sender, msg.value);
     }
 
     fallback() external payable {}
 
-    // External functions
-
-    /// Public functions
-
-    function enterLottery() public payable lotteryOpen {
-        if (msg.value < getEntranceFee()) {
-            revert Lottery_NotEnoughEthToEnter(); // "Not enough ETH to enter!"
-        }
-        i_wethContract.deposit{value: msg.value}();
-        supplyFundsAave(msg.value);
-        s_prizePool += msg.value;
-        s_players.push(payable(msg.sender));
-        emit NewPlayer(block.timestamp, msg.sender, msg.value, s_prizePool);
-    }
-
-    /// Only admin
-    /**
-     * @notice This version of contract waits Admin to start lottery manually
-     */
+    /* Admin functions */
     function startLottery() public lotteryClose onlyOwner {
         s_players = new address payable[](0);
         s_recentWinner = payable(address(0));
@@ -204,54 +122,60 @@ contract Lottery is VRFConsumerBaseV2 {
         s_lotteryState = LotteryState.OPEN;
     }
 
-    /**
-     * @notice This version of contract waits Admin to end lottery manually
-     */
     function endLottery() public lotteryOpen onlyOwner {
         s_lotteryState = LotteryState.CALCULATING_WINNER;
         requestRandomWords();
     }
 
     /**
-     * @notice 1. Withdraw all funds from Aave
-     * @notice 2. Change to ETH
-     * @notice 3. Send to owner
      * @dev This is the function to emergency stop Lottery if smth wrong
+     * 1. Withdraw all funds from Aave
+     * 2. Change to ETH
+     * 3. Send to owner
      */
     function emrgStopLottery() public onlyOwner {
         uint256 bigValue = 100 * 10**18;
         withdrawAaveFunds(bigValue);
         uint256 wethBalance = i_wethContract.balanceOf(address(this));
         changeToEth(wethBalance);
-        s_lotteryState = LotteryState.CLOSE;
         payable(i_owner).transfer(address(this).balance);
-        emit EmrgStopLotteryInitiated(block.timestamp, msg.sender, s_prizePool);
+        s_lotteryState = LotteryState.CLOSE;
     }
 
     function transferFundsToWinner() public lotteryWinnerSelected onlyOwner {
         withdrawAaveFunds(s_prizePool);
         changeToEth(s_prizePool);
-        s_lotteryState = LotteryState.CLOSE;
         s_recentWinner.transfer(s_prizePool);
+        s_lotteryState = LotteryState.CLOSE;
         emit MoneySentToWinner(block.timestamp, s_recentWinner, s_prizePool);
     }
 
-    /**
-     * @notice This version of contract allows to change entrance fee
-     * @notice Entrance fee is set in USD
-     */
+    function checkAaveBalance()
+        public
+        view
+        onlyOwner
+        returns (uint256, uint256)
+    {
+        (
+            uint256 total_collateral_base,
+            uint256 total_debt_base,
+            ,
+            ,
+            ,
+
+        ) = i_aavePool.getUserAccountData(address(this));
+        return (total_collateral_base, total_debt_base);
+    }
+
     function setEntranceFee(uint256 value) public lotteryClose onlyOwner {
         if (value < 1) {
             revert Lottery_InsufficientEntranceFee();
         }
         s_entranceFeeUSD = value;
-        emit EntranceFeeChanged(block.timestamp, s_entranceFeeUSD, msg.sender);
     }
 
-    // Internal functions
-    /**
-     * @notice Assumes the subscription is funded.
-     */
+    /* Internal functions */
+    // Assumes the subscription is funded sufficiently.
     function requestRandomWords() internal onlyOwner {
         // Revert if subscription is not set and funded.
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
@@ -264,10 +188,6 @@ contract Lottery is VRFConsumerBaseV2 {
         emit RandomRequestSent(block.timestamp, requestId);
     }
 
-    /**
-     * @dev Contract is called by VRFConsumerBaseV2 and provide Random words
-     * @inheritdoc VRFConsumerBaseV2
-     */
     function fulfillRandomWords(
         uint256, /* requestId */
         uint256[] memory randomWords
@@ -304,14 +224,23 @@ contract Lottery is VRFConsumerBaseV2 {
         i_wethContract.withdraw(amount);
     }
 
-    // Private
-
-    // View/pure
-
-    function getEntranceFeeUSD() public view returns (uint256) {
-        return s_entranceFeeUSD;
+    /* Public Functions */
+    function enterLottery() public payable lotteryOpen {
+        if (msg.value < getEntranceFee()) {
+            revert Lottery_NotEnoughEthToEnter(); // "Not enough ETH to enter!"
+        }
+        i_wethContract.deposit{value: msg.value}();
+        supplyFundsAave(msg.value);
+        s_prizePool += msg.value;
+        s_players.push(payable(msg.sender));
+        emit NewPlayer(block.timestamp, msg.sender, msg.value, s_prizePool);
     }
 
+    /* Getter Functions */
+
+    /**
+     * @dev This is the function to show actual entrance fee in wei
+     */
     function getEntranceFee() public view returns (uint256) {
         //50*10^(8+18)/3000*10^8 to have answer in wei
         (, int256 conversionRate, , , ) = i_priceFeed.latestRoundData();
@@ -338,28 +267,39 @@ contract Lottery is VRFConsumerBaseV2 {
         return s_lotteryState;
     }
 
-    function getOwner() public view returns (address) {
-        return i_owner;
+    /* Modifiers */
+    modifier onlyOwner() {
+        if (msg.sender != i_owner) {
+            revert Lottery_OnlyOwnerAuthorized(); // "Only admin is allowed to do this operation"
+        }
+        _;
     }
 
-    /// Admin
-    /**
-     * @dev Gives ability to admin to check Aave balance
-     */
-    function checkAaveBalance()
-        public
-        view
-        onlyOwner
-        returns (uint256, uint256)
-    {
-        (
-            uint256 total_collateral_base,
-            uint256 total_debt_base,
-            ,
-            ,
-            ,
+    modifier lotteryOpen() {
+        if (s_lotteryState != LotteryState.OPEN) {
+            revert Lottery_IncorrectState_OpenRequired(); // "Lottery should be started"
+        }
+        _;
+    }
 
-        ) = i_aavePool.getUserAccountData(address(this));
-        return (total_collateral_base, total_debt_base);
+    modifier lotteryClose() {
+        if (s_lotteryState != LotteryState.CLOSE) {
+            revert Lottery_IncorrectState_CloseRequired(); // "Lottery should be finished"
+        }
+        _;
+    }
+
+    modifier lotteryCalculatingWinner() {
+        if (s_lotteryState != LotteryState.CALCULATING_WINNER) {
+            revert Lottery_IncorrectState_CalcWinnerRequired(); // "Lottery should be in process of calculating winner"
+        }
+        _;
+    }
+
+    modifier lotteryWinnerSelected() {
+        if (s_lotteryState != LotteryState.WINNER_SELECTED) {
+            revert Lottery_IncorrectState_WinnerSelectedRequired(); // "Lottery should select winner"
+        }
+        _;
     }
 }

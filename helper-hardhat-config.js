@@ -1,6 +1,6 @@
 const networkConfig = {
   default: {
-    name: "hardhat",
+    name: "localhost",
   },
   31337: {
     name: "localhost",
@@ -28,9 +28,17 @@ const networkConfig = {
 
 const developmentChains = ["hardhat", "localhost"];
 const VERIFICATION_BLOCK_CONFIRMATIONS = 6;
+const ENTRANCE_FEE = 50;
+
+// Parameters for MockV3Aggregator:
+const DECIMALS = 8;
+const INITIAL_ANSWER = 189360777776;
 
 module.exports = {
   networkConfig,
   developmentChains,
   VERIFICATION_BLOCK_CONFIRMATIONS,
+  ENTRANCE_FEE,
+  DECIMALS,
+  INITIAL_ANSWER,
 };

@@ -1,8 +1,9 @@
-const { getNamedAccounts, deployments, network, ethers } = require("hardhat");
+const { network, ethers } = require("hardhat");
 const {
   networkConfig,
   developmentChains,
   VERIFICATION_BLOCK_CONFIRMATIONS,
+  ENTRANCE_FEE,
 } = require("../helper-hardhat-config");
 const { verify } = require("../utils/verify");
 
@@ -20,7 +21,11 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
 
   /*   const [, answer, , ,] = await mockContract.latestRoundData();
   console.log(answer.toString()); */
-  let subscriptionId, vrfCoordinatorV2Address, priceFeedAddress;
+  let subscriptionId,
+    vrfCoordinatorV2Address,
+    priceFeedAddress,
+    aavePoolAddress,
+    aaveWethAddress;
 
   // On development chain we create and fund subscription
   if (developmentChains.includes(network.name)) {
@@ -35,6 +40,10 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
       deployer
     );
     priceFeedAddress = priceFeedMock.address;
+
+    aavePoolAddress = (await ethers.getContract("MockAavePool")).address;
+
+    aaveWethAddress = (await ethers.getContract("MockAaveWeth")).address;
 
     log("Create and Fund subscription for vrfCoordinator on a local network");
 
@@ -51,6 +60,8 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
     vrfCoordinatorV2Address = networkConfig[chainId]["vrfCoordinatorV2"];
     subscriptionId = networkConfig[chainId]["subscriptionId"];
     priceFeedAddress = networkConfig[chainId]["ethUsdPriceFeed"];
+    aavePoolAddress = networkConfig[chainId]["aavePoolAddress"];
+    aaveWethAddress = networkConfig[chainId]["aaveWethAddress"];
   }
 
   log("----------------------------------------------------------");
@@ -58,10 +69,11 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
   // constructor(address _priceFeedAddress, address _vrfCoordinator, address _aavePoolAddress,
   // address _wethContractAddress, uint64 _subscriptionId, bytes32 _keyHash)
   const arguments = [
+    ENTRANCE_FEE,
     priceFeedAddress,
     vrfCoordinatorV2Address,
-    networkConfig[chainId]["aavePoolAddress"],
-    networkConfig[chainId]["aaveWethAddress"],
+    aavePoolAddress,
+    aaveWethAddress,
     subscriptionId,
     networkConfig[chainId]["keyHash"],
   ];
